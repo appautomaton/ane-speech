@@ -43,11 +43,15 @@ on an older macOS, ane-speech says so when it starts.
 | --- | --- | --- |
 | `confucius4_r2t2` (default) | [Confucius4-R2T2](https://huggingface.co/appautomaton/confucius4-r2t2-fp16-ane) | Live transcription: text appears while you speak |
 | `qwen3_asr_1_7b` | [Qwen3-ASR 1.7B](https://huggingface.co/appautomaton/qwen3-asr-1.7b-fp16-ane) | Whole recordings: one accurate pass once you stop |
+| `qwen3_forced_aligner_0_6b` | [Qwen3-ForcedAligner 0.6B](https://huggingface.co/appautomaton/qwen3-forced-aligner-0.6b-fp16-ane) | Timestamps: when each word of a known transcript was spoken |
 
-Both are multilingual, take a hint of names and terms to expect, and match
-their MLX originals word for word apart from rare near-ties. Each downloads
-from Hugging Face the first time you use it. A recording or live take holds
-up to about a minute of speech.
+The recognizers are multilingual, take a hint of names and terms to expect,
+and match their MLX originals word for word apart from rare near-ties; a
+recording or live take holds up to about a minute of speech. The aligner
+times Chinese and English, character by character and word by word; it runs
+from a source checkout ([Building from source](#building-from-source)), while
+the PyPI release carries the two recognizers. Each model downloads from
+Hugging Face the first time you use it.
 
 ## Command line
 
@@ -55,6 +59,7 @@ up to about a minute of speech.
 ane-speech transcribe meeting.wav --checkpoint qwen3_asr_1_7b
 ane-speech transcribe meeting.wav --checkpoint qwen3_asr_1_7b --language Chinese --context "Acme, Kubernetes"
 ane-speech stream meeting.wav       # R2T2, played as if spoken live, text printed as it settles
+ane-speech align meeting.wav --text "the exact transcript"   # from source: start, end, and word per line
 ane-speech pull qwen3_asr_1_7b      # download ahead of time
 ```
 
@@ -76,6 +81,14 @@ session = live.stream_session(chunk_ms=480)
 for pcm in microphone:                        # 16 kHz mono float32, any length
     print(session.feed(pcm).committed)        # final text, which only grows
 print(session.finalize().text)
+```
+
+Timestamps for a transcript, such as the one above, from a source checkout:
+
+```python
+aligner = ane_speech.load("qwen3_forced_aligner_0_6b")
+for text, start_s, end_s in aligner.generate("meeting.wav", result.text):
+    print(f"{start_s:.2f}  {end_s:.2f}  {text}")
 ```
 
 A loaded model runs in a helper process of its own and exits with yours. The
@@ -113,6 +126,7 @@ git clone https://github.com/appautomaton/ane-speech.git
 cd ane-speech
 swift build -c release
 uv run ane-speech transcribe speech.wav    # models still come from Hugging Face
+uv run ane-speech align speech.wav --text "the exact transcript"
 ```
 
 [AGENTS.md](AGENTS.md) covers converting models yourself, the checks behind

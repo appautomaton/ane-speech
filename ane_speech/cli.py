@@ -1,8 +1,9 @@
 """`ane-speech`, as installed from PyPI: the Swift CLI, with models found by name.
 
-`pull` downloads checkpoints. `transcribe`, `stream`, and `serve` run the one
-named by `--checkpoint`, downloading it first if needed, unless `--artifacts`
-names a folder. Everything else reaches the Swift CLI unchanged.
+`pull` downloads checkpoints. `transcribe`, `stream`, `align`, and `serve` run
+the one named by `--checkpoint` (for `align`, the aligner by default),
+downloading it first if needed, unless `--artifacts` names a folder.
+Everything else reaches the Swift CLI unchanged.
 """
 
 from __future__ import annotations
@@ -11,10 +12,10 @@ import os
 import subprocess
 import sys
 
-from ane_speech.hub import CHECKPOINTS, DEFAULT, pull
+from ane_speech.hub import ALIGNER, CHECKPOINTS, DEFAULT, pull
 from ane_speech.model import binary
 
-RUNS_A_MODEL = {"transcribe", "stream", "serve"}
+RUNS_A_MODEL = {"transcribe", "stream", "align", "serve"}
 PULL_USAGE = f"""\
        ane-speech pull [<checkpoint> ...]
            downloads models ({', '.join(CHECKPOINTS)}); they also download on first use
@@ -38,7 +39,8 @@ def main(argv: list[str] | None = None) -> None:
             print(pull(checkpoint))
         return
     if command in RUNS_A_MODEL and "--artifacts" not in args:
-        args = [*args, "--artifacts", str(pull(_option(args, "--checkpoint") or DEFAULT))]
+        default = ALIGNER if command == "align" else DEFAULT
+        args = [*args, "--artifacts", str(pull(_option(args, "--checkpoint") or default))]
     os.execv(binary(), [str(binary()), *args])
 
 

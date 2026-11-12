@@ -52,7 +52,7 @@ public actor Qwen3ASR {
     public let encoder: Qwen3ASREncoder
     public let decoder: Qwen3ASRDecoder
     private let embeddings: EmbeddingTable
-    private let inverseFrequencies: [Float]
+    private let rotary: RoPE
 
     /// `artifacts` is a checkpoint's folder, such as
     /// `artifacts/qwen3_asr/confucius4_r2t2`.
@@ -77,10 +77,9 @@ public actor Qwen3ASR {
         let dec = try decode.decode(DecoderMeta.self, from: Data(contentsOf: artifacts.appending(path: "decoder.json")))
         decoder = try await Qwen3ASRDecoder(
             directory: artifacts, chunk: dec.chunk, cache: dec.cache, layersPerSegment: dec.segment,
-            segments: dec.segments, step: dec.step == 1, masked: dec.masked, preferring: unit)
-
-        let (theta, headDim) = (Float(config.rope_theta), config.head_dim)
-        inverseFrequencies = (0..<headDim / 2).map { 1 / pow(theta, Float(2 * $0) / Float(headDim)) }
+            segments: dec.segments, step: dec.step == 1, hidden: config.hidden_size, masked: dec.masked,
+            preferring: unit)
+        rotary = RoPE(theta: config.rope_theta, headDim: config.head_dim)
     }
 
     // MARK: Offline
@@ -250,30 +249,13 @@ public actor Qwen3ASR {
     }
 
     private func feed(_ rows: [Float16], at position: Int, rows count: Int) async throws {
-        let (cos, sin) = rope(at: position, rows: count)
+        let (cos, sin) = rotary.tables(at: position, rows: count)
         try await decoder.feed(rows: count, embeddings: rows, cos: cos, sin: sin)
     }
 
     private func step(_ rows: [Float16], at position: Int, rows count: Int) async throws -> NDArray {
-        let (cos, sin) = rope(at: position, rows: count)
+        let (cos, sin) = rotary.tables(at: position, rows: count)
         return try await decoder.step(rows: count, embeddings: rows, cos: cos, sin: sin)
-    }
-
-    /// RoPE tables for positions `position ..< position + count`, mlx-speech's
-    /// layout: the half-width frequencies, repeated twice.
-    private func rope(at position: Int, rows count: Int) -> (cos: [Float16], sin: [Float16]) {
-        var cos: [Float16] = []
-        var sin: [Float16] = []
-        cos.reserveCapacity(count * config.head_dim)
-        sin.reserveCapacity(count * config.head_dim)
-        for p in position ..< position + count {
-            let angles = inverseFrequencies.map { Float(p) * $0 }
-            let c = angles.map { Float16(Foundation.cos($0)) }
-            let s = angles.map { Float16(Foundation.sin($0)) }
-            cos += c + c
-            sin += s + s
-        }
-        return (cos, sin)
     }
 
     // MARK: Output

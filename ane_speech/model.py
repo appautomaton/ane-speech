@@ -1,8 +1,10 @@
 """A converted checkpoint, loaded once in a resident `ane-speech serve` process.
 
 The Swift CLI runs the models on the Neural Engine; this side speaks its JSON
-lines protocol (Sources/ane-speech/Serve.swift) and nothing else. Method names
-follow mlx-speech's ASR models, so code written against one runs on the other.
+lines protocol (Sources/ane-speech/Serve.swift) and nothing else. A recognizer
+loads as a `Model`, the aligner as an `Aligner`. Method names follow
+mlx-speech's ASR and alignment models, so code written against one runs on the
+other.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ import subprocess
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple, Self
 
 import numpy as np
 
@@ -59,14 +62,26 @@ class StreamUpdate:
     """The take has filled the model's cache and takes no more audio; finalize it."""
 
 
-def load(checkpoint: str = DEFAULT, *, artifacts: str | os.PathLike[str] | None = None) -> Model:
-    """Loads `checkpoint`, downloading it first if needed. `artifacts` names a
-    converted checkpoint's folder instead, such as one under a source
-    checkout's artifacts/qwen3_asr/."""
-    return Model(Path(artifacts) if artifacts is not None else pull(checkpoint))
+class AlignItem(NamedTuple):
+    """One unit of a transcript, a Chinese character or an English word, and when it was spoken."""
+
+    text: str
+    start_s: float
+    end_s: float
 
 
-class Model:
+def load(checkpoint: str = DEFAULT, *, artifacts: str | os.PathLike[str] | None = None) -> Model | Aligner:
+    """Loads `checkpoint`, downloading it first if needed: a recognizer as a
+    `Model`, the aligner as an `Aligner`. `artifacts` names a converted
+    checkpoint's folder instead, such as one under a source checkout's
+    artifacts/qwen3_asr/."""
+    folder = Path(artifacts) if artifacts is not None else pull(checkpoint)
+    runtime = folder / "runtime" / "runtime.json"
+    aligns = runtime.is_file() and "timestamp_token_id" in json.loads(runtime.read_text())
+    return Aligner(folder) if aligns else Model(folder)
+
+
+class _Helper:
     """One checkpoint in its own `ane-speech serve` process, which exits with
     this one. Calls are serialized; a helper that dies is restarted on the next
     call."""
@@ -80,47 +95,13 @@ class Model:
         self._proc: subprocess.Popen[bytes] | None = None
         self._spawn()
 
-    def generate(
-        self,
-        audio: str | os.PathLike[str] | np.ndarray,
-        *,
-        sample_rate: int = SAMPLE_RATE,
-        language: str | None = None,
-        context: str = "",
-    ) -> Transcript:
-        """Transcribes a whole recording: an audio file, or 16 kHz mono samples.
-        `language` forces the output language, which is otherwise detected;
-        `context` is background for the model, such as names to expect."""
-        source = {"path": os.path.abspath(audio)} if isinstance(audio, (str, os.PathLike)) else {"pcm": _pcm(audio, sample_rate)}
-        reply = self._request({"op": "transcribe", **source, "language": language, "context": context})
-        return Transcript(text=reply["text"], language=reply["language"])
-
-    def stream_session(
-        self,
-        *,
-        language: str | None = None,
-        context: str = "",
-        chunk_ms: int = 160,
-        lookahead_ms: int = 160,
-        unfixed_token_num: int = 1,
-        sample_rate: int = SAMPLE_RATE,
-    ) -> StreamSession:
-        """Starts a live take, replacing any open one. Built for Confucius4-R2T2,
-        the streaming checkpoint."""
-        _check_rate(sample_rate)
-        self._request({
-            "op": "start", "language": language, "context": context, "chunk_ms": chunk_ms,
-            "lookahead_ms": lookahead_ms, "unfixed_tokens": unfixed_token_num,
-        })
-        return StreamSession(self)
-
     def close(self) -> None:
         proc, self._proc = self._proc, None
         if proc is not None and proc.poll() is None:
             proc.kill()
             proc.wait()
 
-    def __enter__(self) -> Model:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *_: object) -> None:
@@ -167,6 +148,66 @@ class Model:
         return data
 
 
+class Model(_Helper):
+    """A recognizer: Confucius4-R2T2 or Qwen3-ASR."""
+
+    def generate(
+        self,
+        audio: str | os.PathLike[str] | np.ndarray,
+        *,
+        sample_rate: int = SAMPLE_RATE,
+        language: str | None = None,
+        context: str = "",
+    ) -> Transcript:
+        """Transcribes a whole recording: an audio file, or 16 kHz mono samples.
+        `language` forces the output language, which is otherwise detected;
+        `context` is background for the model, such as names to expect."""
+        reply = self._request({"op": "transcribe", **_audio(audio, sample_rate), "language": language, "context": context})
+        return Transcript(text=reply["text"], language=reply["language"])
+
+    def stream_session(
+        self,
+        *,
+        language: str | None = None,
+        context: str = "",
+        chunk_ms: int = 160,
+        lookahead_ms: int = 160,
+        unfixed_token_num: int = 1,
+        sample_rate: int = SAMPLE_RATE,
+    ) -> StreamSession:
+        """Starts a live take, replacing any open one. Built for Confucius4-R2T2,
+        the streaming checkpoint."""
+        _check_rate(sample_rate)
+        self._request({
+            "op": "start", "language": language, "context": context, "chunk_ms": chunk_ms,
+            "lookahead_ms": lookahead_ms, "unfixed_tokens": unfixed_token_num,
+        })
+        return StreamSession(self)
+
+
+class Aligner(_Helper):
+    """Qwen3-ForcedAligner: times a known transcript against its audio, Chinese
+    and English, to 80 ms classes."""
+
+    def generate(
+        self,
+        audio: str | os.PathLike[str] | np.ndarray,
+        text: str,
+        *,
+        language: str | None = None,
+        sample_rate: int = SAMPLE_RATE,
+    ) -> list[AlignItem]:
+        """A span for every Chinese character and English word of `text`, the
+        exact transcript of `audio` (a file, or 16 kHz mono samples). The
+        transcript must match the speech: every unit gets a span, spoken or
+        not. `language` ("zh" or "en") is checked, as mlx-speech does, but both
+        follow one rule, so mixed text aligns under either."""
+        if language is not None and language not in ("zh", "en"):
+            raise ValueError(f"the aligner takes language 'zh' or 'en'; got {language!r}")
+        reply = self._request({"op": "align", **_audio(audio, sample_rate), "text": text})
+        return [AlignItem(unit, start, end) for unit, start, end in reply["items"]]
+
+
 class StreamSession:
     """One live take: `feed` audio as it arrives, then `finalize`."""
 
@@ -188,6 +229,13 @@ class StreamSession:
 def _check_rate(sample_rate: int) -> None:
     if sample_rate != SAMPLE_RATE:
         raise ValueError(f"ane-speech takes {SAMPLE_RATE} Hz audio; got {sample_rate} Hz")
+
+
+def _audio(audio: str | os.PathLike[str] | np.ndarray, sample_rate: int) -> dict:
+    """A request's audio: a file by absolute path, or the samples themselves."""
+    if isinstance(audio, (str, os.PathLike)):
+        return {"path": os.path.abspath(audio)}
+    return {"pcm": _pcm(audio, sample_rate)}
 
 
 def _pcm(audio: np.ndarray, sample_rate: int) -> str:

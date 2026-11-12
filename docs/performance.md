@@ -176,3 +176,22 @@ check gives the same transcripts and the same per-step ids as before. R2T2
 streaming at 480 ms, High Power Mode, median window: zh 158 → 127 ms, Hank
 55 s 169 → 147 ms; it prefills most of each window at T = 128, so it gains
 less than one-take Qwen3-ASR.
+
+## Qwen3-ForcedAligner
+
+Recorded once, 2026-11-12, after conversion, from `ane-speech check --checkpoint
+qwen3_forced_aligner_0_6b` (High Power Mode, warm compiled cache, other work in
+the background):
+the decoder at T = 128 against 2048 cache rows, no `step` function.
+
+| Clip | Units | Prompt rows | Align, encoder through spans |
+| --- | ---: | ---: | ---: |
+| test.wav, 6.7 s Chinese | 20 | 150 | 0.10 s |
+| multilingual_sample, 24.9 s English | 68 | 545 | 0.28 s |
+
+Loading takes 0.19 s warm; the first load on an OS build compiled for 14 s.
+The CLI's `align` on a 20 s Chinese take, after `transcribe` gave its text,
+took 0.50 s as a whole process. The Core AI encoder's error against MLX float32
+is 2.6e-3, against 7.3e-3 for MLX bf16; the decoder's time classes match
+mlx-speech's float32 pass on all 176 reference timestamps, where mlx-speech's
+own bf16 pass differs on one, by 7 classes.

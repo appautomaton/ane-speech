@@ -33,7 +33,7 @@ def main() -> None:
     failed = []
     for name in args.parts or PARTS:
         part = PARTS[name]
-        out = encoder_dir() if part is encoder else artifacts_dir(args.checkpoint)  # the encoder is shared
+        out = encoder_dir(args.checkpoint) if part is encoder else artifacts_dir(args.checkpoint)
         start = time.perf_counter()
         part.build(out)
         print(f"{name}: built in {time.perf_counter() - start:.1f} s")

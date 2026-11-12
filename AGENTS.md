@@ -4,22 +4,27 @@ Speech models on the Apple Neural Engine (ANE) through Core AI. Sibling of
 `../mlx-speech`, whose code traces the models and whose bf16 checkpoints are
 the main weight source.
 
-Converted so far, one family (`qwen3_asr`) with two checkpoints of one
+Converted so far, one family (`qwen3_asr`) with three checkpoints of one
 architecture:
 
 | Checkpoint | Converted from | Used as |
 | --- | --- | --- |
 | `confucius4_r2t2` | mlx-speech `models/netease/confucius4_r2t2/mlx-bf16` | streaming (R2T2) |
 | `qwen3_asr_1_7b` | official bf16 release, `~/dev/ai/models/speech/ASR/Qwen3-ASR-1.7B` | one take at a time |
+| `qwen3_forced_aligner_0_6b` | upstream bf16, mlx-speech `models/qwen3_forced_aligner_0_6b/original` | timing a known transcript |
 
-R2T2 finetuned only the decoder (and the embedding table), so the two share
-the audio encoder bit for bit. The artifacts are self-contained:
+R2T2 finetuned only the decoder (and the embedding table), so the two
+recognizers share the audio encoder bit for bit. The aligner is a smaller
+Qwen3-ASR (width 1024) whose head picks one of 5000 time classes of 80 ms at
+each `<timestamp>` row, in one pass with no generation; it keeps its own
+encoder. The artifacts are self-contained:
 
 ```
 artifacts/qwen3_asr/
-  audio_encoder/     the shared encoder; tracing either checkpoint checks it matches
-  <checkpoint>/      decoder models (functions `segment`, T=128, and `step`, T=1),
-                     and runtime/: constants, embeddings.f16, tokenizer/
+  audio_encoder/     the recognizers' encoder; tracing either checks it matches
+  <checkpoint>/      decoder models (functions `segment`, T=128, and for the
+                     recognizers `step`, T=1), and runtime/: constants,
+                     embeddings.f16, tokenizer/; the aligner's also audio_encoder/
 ```
 
 Two halves, one direction: Python converts once, Swift runs.
@@ -125,6 +130,7 @@ swift run ane-speech evict artifacts/<model>.aimodel
 .build/release/ane-speech stream-check   # R2T2 streaming parity vs artifacts/qwen3_asr/confucius4_r2t2/runtime/stream_*.json
 .build/release/ane-speech stream <audio> [--chunk-ms 640]
 .build/release/ane-speech transcribe <audio> [--checkpoint <name>] [--context <text>]
+.build/release/ane-speech align <audio> --text <transcript>   # the aligner by default
 .build/release/ane-speech serve [--checkpoint <name>]  # resident helper, JSON lines on stdin/stdout (tnt-asr)
 ```
 
@@ -143,6 +149,15 @@ uv run --project ../mlx-speech python -m reference.qwen3_asr_runtime_assets --ch
 uv run python -m convert.qwen3_asr --checkpoint <name>    # build and check against MLX; placement
 swift build -c release && .build/release/ane-speech check --checkpoint <name>
 ```
+
+The aligner swaps the decoder trace and the runtime assets for its own
+scripts, `reference.qwen3_aligner_trace` (`--cache`, default 2048 rows: about
+75 s of Chinese or 90 s of English with its transcript) and
+`reference.qwen3_aligner_assets`; the other steps take
+`--checkpoint qwen3_forced_aligner_0_6b`. Its references are mlx-speech's
+float32 pass: neighbouring time classes can nearly tie, and bf16 noise alone
+moves some (`reference/qwen3_aligner_trace.py`), so the checks allow one class
+at a near-tie and nothing else.
 
 Before overwriting a model a running process has loaded, evict its cache
 entries or set the old files aside and evict them once nothing holds them
@@ -168,9 +183,9 @@ at those two moments:
    done
    ```
 
-   Expect the shared encoder once, then four decoder segments and the head
-   per checkpoint (eleven entries for two), all ANE, each flagged
-   `mps.noGPUActivity`.
+   Expect the recognizers' shared encoder once, then four decoder segments
+   and the head per checkpoint, and the aligner's own encoder (seventeen
+   entries for all three), all ANE, each flagged `mps.noGPUActivity`.
 3. While dictating, watch `mactop`: ANE activity rises and the GPU stays at its
    background level.
 
@@ -185,13 +200,15 @@ format, rely on step 3 and update step 2.
 | --- | --- | --- |
 | `appautomaton/qwen3-asr-1.7b-fp16-ane` | `qwen3_asr_1_7b` | Apache-2.0 |
 | `appautomaton/confucius4-r2t2-fp16-ane` | `confucius4_r2t2` | NetEase Youdao Model Use License |
+| `appautomaton/qwen3-forced-aligner-0.6b-fp16-ane` | `qwen3_forced_aligner_0_6b` | Apache-2.0 |
 
 Each repo mirrors `artifacts/qwen3_asr/` with only what the runtime reads: the
 shared `audio_encoder/` (`encoder.aimodel`, `encoder.json`) and one
 `<checkpoint>/` (`decoder.json`, the `decoder_*.aimodel` models, and
 `runtime/` without its reference files), about 4.4 GB, plus the card and
-license from `docs/model-cards/<repo>/`. R2T2's license requires its full text
-and the disclaimer sentence in the card on every redistribution.
+license from `docs/model-cards/<repo>/`. The aligner's repo holds only its
+`<checkpoint>/`, its encoder inside, about 1.8 GB. R2T2's license requires its
+full text and the disclaimer sentence in the card on every redistribution.
 
 To publish a reconverted model, stage APFS clones, which take no space, and
 upload:
@@ -206,6 +223,9 @@ cp docs/model-cards/$repo/{README.md,LICENSE} $out/
 .build/release/ane-speech transcribe <audio> --artifacts $out/$ck   # the staged set is complete
 HF_XET_CACHE=$PWD/.tmp/xet hf upload appautomaton/$repo $out . --commit-message "<what changed>"
 ```
+
+For the aligner, the encoder goes to `$out/$ck/audio_encoder/` instead of
+`$out/audio_encoder/`, and the check is `align <audio> --text <transcript>`.
 
 Then compare each local file's sha256 with the `lfs.oid` that
 `https://huggingface.co/api/models/appautomaton/<repo>/tree/main?recursive=true&expand=true`
@@ -225,6 +245,11 @@ checkout the package runs `.build/release/ane-speech`; in a wheel, its own
 copy. PyPI rejects macOS wheel tags newer than the versions it lists, so the
 wheel may claim an older macOS than `Package.swift` requires
 (`PYPI_NEWEST_MACOS` in `hatch_build.py`); `binary()` checks the real one.
+
+PyPI has 0.1.0, the two recognizers. `main` also carries the aligner, which
+is not released and has no release planned; `pyproject.toml` says
+`0.2.0.dev0`, and the README and the aligner's card send users to a source
+checkout for it.
 
 PyPI trusts `release.yml` in this repo by OIDC, in the `pypi` environment, so
 no token exists anywhere. The environment needs the user's approval and takes

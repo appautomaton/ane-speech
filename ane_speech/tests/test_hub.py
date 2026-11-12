@@ -24,5 +24,5 @@ def test_every_checkpoint_pins_a_full_commit():
 
 
 def test_pull_names_the_checkpoints_it_knows():
-    with pytest.raises(ValueError, match="confucius4_r2t2, qwen3_asr_1_7b"):
+    with pytest.raises(ValueError, match="confucius4_r2t2, qwen3_asr_1_7b, qwen3_forced_aligner_0_6b"):
         hub.pull("whisper")

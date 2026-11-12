@@ -101,8 +101,11 @@ def export_meta(out_dir: Path) -> None:
 
 
 def export_reference(out_dir: Path) -> None:
-    """decoder_reference.npz as raw little-endian files the Swift check reads directly."""
+    """decoder_reference.npz as raw little-endian files the Swift check reads
+    directly. The aligner's reference is checked here only."""
     ref = np.load(out_dir / "decoder_reference.npz")
+    if "positions" in ref:
+        return
     meta = json.loads((out_dir / "decoder_segment0.json").read_text())
     ref_dir = out_dir / "decoder_reference"
     ref_dir.mkdir(exist_ok=True)
@@ -175,18 +178,23 @@ async def check(out_dir: Path) -> bool:
     kv, d = 8, cos.shape[1]
     decoder = Decoder(segments, head, meta, layers, kv, d, step_functions or None)
     # As in generation: the prompt in chunks, then each generated token alone.
+    # The aligner has no generated tokens: its classes are read at `positions`.
     p, tokens, t = int(ref["prompt_rows"]), ref["tokens"], meta["chunk"]
     spans = [(i, min(i + t, p)) for i in range(0, p, t)] + [(i, i + 1) for i in range(p, embeds.shape[0])]
     start = time.perf_counter()
     logits = np.concatenate([await decoder.chunk(embeds[a:b], cos[a:b], sin[a:b]) for a, b in spans])
     took = time.perf_counter() - start
-    steps = logits[p - 1 : p - 1 + len(tokens)]
-    agree = float((steps.argmax(-1) == tokens).mean())
+    aligner = "positions" in ref
+    steps = logits[ref["positions"]] if aligner else logits[p - 1 : p - 1 + len(tokens)]
+    off = np.abs(steps.argmax(-1) - tokens)
+    agree = float((off == 0).mean())
     err = rel_l2(steps, ref["logits"])
     finite = bool(np.isfinite(logits).all())
+    what = f"time classes agree {agree:.1%}, off by at most {off.max()}" if aligner else f"greedy tokens agree {agree:.0%}"
     print(f"  teacher-forced {embeds.shape[0]} rows ({'tokens one row at a time' if step_functions else 'all in chunks'}) "
-          f"in {took:.2f} s: greedy tokens agree {agree:.0%} ({len(tokens)} tokens), "
-          f"logits rel L2 vs MLX f32 {err:.2e}, finite {finite}")
+          f"in {took:.2f} s: {what} ({len(tokens)}), logits rel L2 vs MLX f32 {err:.2e}, finite {finite}")
+    # Near-ties between neighbouring time classes may flip; tokens may not.
+    matches = off.max() <= 1 and agree >= 0.98 if aligner else agree == 1.0
 
     one = [embeds[-1:], cos[-1:], sin[-1:]]
     calls = 0
@@ -203,4 +211,4 @@ async def check(out_dir: Path) -> bool:
 
     idle, busy = await asyncio.to_thread(ane_activity, 3.0, work)
     print(f"  ANE active {idle:.0f}% idle, {busy:.0f}% while decoding; {3e3 / calls:.0f} ms per token")
-    return agree == 1.0 and finite and busy > 50
+    return matches and finite and busy > 50

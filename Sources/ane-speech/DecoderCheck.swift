@@ -29,7 +29,8 @@ func decoderCheck(_ directory: URL) async throws {
     var clock = ContinuousClock.now
     let decoder = try await Qwen3ASRDecoder(
         directory: directory, chunk: meta.chunk, cache: meta.cache,
-        layersPerSegment: meta.segment, segments: segments, step: oneRow, masked: meta.masked)
+        layersPerSegment: meta.segment, segments: segments, step: oneRow, hidden: embeds.count / meta.rows,
+        masked: meta.masked)
     print("loaded \(segments) segments and the head in \(ContinuousClock.now - clock)")
     let (h, d) = (decoder.shape.hidden, decoder.shape.headDim)
 

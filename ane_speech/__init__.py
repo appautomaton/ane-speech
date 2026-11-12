@@ -10,14 +10,19 @@
     for pcm in microphone:                       # float32, 16 kHz mono
         print(session.feed(pcm).committed)
     print(session.finalize().text)
+
+    aligner = ane_speech.load("qwen3_forced_aligner_0_6b")
+    for text, start_s, end_s in aligner.generate("speech.wav", "the exact transcript"):
+        print(f"{start_s:.2f} {end_s:.2f} {text}")
 """
 
 from importlib.metadata import version
 
 from ane_speech.hub import CHECKPOINTS, DEFAULT, pull
-from ane_speech.model import Model, StreamSession, StreamUpdate, Transcript, load
+from ane_speech.model import Aligner, AlignItem, Model, StreamSession, StreamUpdate, Transcript, load
 
 __version__ = version("ane-speech")
 __all__ = [
-    "CHECKPOINTS", "DEFAULT", "Model", "StreamSession", "StreamUpdate", "Transcript", "load", "pull",
+    "CHECKPOINTS", "DEFAULT", "AlignItem", "Aligner", "Model", "StreamSession", "StreamUpdate", "Transcript",
+    "load", "pull",
 ]

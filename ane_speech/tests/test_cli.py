@@ -48,6 +48,12 @@ def test_model_commands_default_to_r2t2(run):
     assert run("stream", "a.wav")[0] == ["stream", "a.wav", "--artifacts", "/cache/confucius4_r2t2"]
 
 
+def test_align_defaults_to_the_aligner(run):
+    argv, pulled = run("align", "a.wav", "--text", "hi")
+    assert argv == ["align", "a.wav", "--text", "hi", "--artifacts", "/cache/qwen3_forced_aligner_0_6b"]
+    assert pulled == ["qwen3_forced_aligner_0_6b"]
+
+
 def test_explicit_artifacts_skip_the_download(run):
     assert run("serve", "--artifacts", "here") == (["serve", "--artifacts", "here"], [])
 

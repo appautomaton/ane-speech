@@ -3,7 +3,8 @@
 The ANE computes in fp16, whose largest finite value is 65504. This transcribes
 clips with mlx-speech's reference (float32) decoder path and records, per layer,
 the largest magnitude each probed tensor reaches over the prefill and every
-generated token. Run it from the repo root under mlx-speech's environment; MLX
+generated token. For the aligner, it aligns its reference clips in float32 and
+records the one full pass. Run it from the repo root under mlx-speech's environment; MLX
 needs Metal, so run it outside any sandbox:
 
     uv run --project ../mlx-speech python -m reference.qwen3_asr_decoder_ranges [wav ...]
@@ -22,8 +23,9 @@ from pathlib import Path
 import mlx.core as mx
 import mlx_speech.models.qwen3_asr.text_decoder as td
 from mlx_speech.generation.qwen3_asr import Qwen3ASRTranscriber
+from mlx_speech.generation.qwen3_forced_aligner import Qwen3ForcedAligner
 
-from convert.qwen3_asr import add_checkpoint_argument, model_dir, sample_wav
+from convert.qwen3_asr import ALIGNERS, add_checkpoint_argument, align_clips, model_dir, sample_wav
 
 FP16_MAX = 65504.0
 NORM_MAX = FP16_MAX**0.5  # x^2 overflows fp16 above this
@@ -82,6 +84,17 @@ def install_probes() -> None:
     td.Qwen3ASRTextForCausalLM.prefill = probed_lm(td.Qwen3ASRTextForCausalLM.prefill)
     td.Qwen3ASRTextForCausalLM.decode_step = probed_lm(td.Qwen3ASRTextForCausalLM.decode_step)
 
+    # The aligner's single pass: the layers' __call__, then logits at the timestamps.
+    td.Qwen3ASRTextDecoderLayer.__call__ = probed_layer("__call__")
+    project = td.Qwen3ASRTextForCausalLM.project_logits
+
+    def probed_project(self, *args, **kwargs):
+        logits = probe("lm_logits", project(self, *args, **kwargs))
+        mx.eval(list(maxima.values()))
+        return logits
+
+    td.Qwen3ASRTextForCausalLM.project_logits = probed_project
+
 
 def fmt(v: float) -> str:
     return f"{v:,.1f}"
@@ -98,10 +111,17 @@ def main() -> None:
     args = parser.parse_args()
 
     install_probes()
-    asr = Qwen3ASRTranscriber.from_dir(model_dir(args.checkpoint))
+    if args.checkpoint in ALIGNERS:
+        asr = Qwen3ForcedAligner.from_dir(model_dir(args.checkpoint), dtype=mx.float32)
+    else:
+        asr = Qwen3ASRTranscriber.from_dir(model_dir(args.checkpoint))
     for i, layer in enumerate(asr.model.text_decoder.model.layers):
         layer.mlp.probe_index = i
-    for wav in args.wavs:
+    if args.checkpoint in ALIGNERS:
+        for wav, text, language in align_clips():
+            result = asr.align(wav, text, language=language)
+            print(f"{wav.name}: {result.prompt_tokens} prompt tokens, {len(result.spans)} units")
+    for wav in [] if args.checkpoint in ALIGNERS else args.wavs:
         result = asr.transcribe(wav)
         print(f"{wav.name}: {result.prompt_tokens} prompt tokens, {len(result.tokens)} generated: {result.text}")
 
@@ -118,7 +138,7 @@ def main() -> None:
             over_norm.append(i)
         print(f"| {i} | {fmt(resid)}{flag(resid)} | {fmt(get('logits'))}{flag(get('logits'))} "
               f"| {fmt(get('ffn_hidden'))}{flag(get('ffn_hidden'))} | {other} {fmt(get(other))}{flag(get(other))} |")
-    print(f"\nvocab logits: {fmt(values['lm_logits'])}{flag(values['lm_logits'])}")
+    print(f"\nhead logits: {fmt(values['lm_logits'])}{flag(values['lm_logits'])}")
     peak = max(values, key=values.get)
     print(f"peak: {peak} {fmt(values[peak])} ({FP16_MAX / values[peak]:.1f}x below fp16 max)")
     print(f"residual above {NORM_MAX:.0f} (RMSNorm squares overflow fp16 unless scaled): "

@@ -7,10 +7,11 @@ it outside any sandbox:
 
 The encoder attends within 8-second blocks (n_window_infer mel frames, 104
 tokens), so one block is the unit the ANE model computes. This traces
-mlx-speech's own modules over a full block and writes to the shared
-artifacts/qwen3_asr/audio_encoder/. When an encoder is already there, the
-checkpoint's must match it constant for constant; then nothing is written,
-and the script fails if it differs. It writes:
+mlx-speech's own modules over a full block and writes to the checkpoint's
+encoder folder: the recognizers share artifacts/qwen3_asr/audio_encoder/, and
+the aligner keeps its own. When an encoder is already there, the checkpoint's
+must match it constant for constant; then nothing is written, and the script
+fails if it differs. It writes:
 
   encoder_block.json       traced primitives in execution order, and the dtype
                            of every constant
@@ -78,7 +79,7 @@ def main() -> None:
     parser.add_argument("--wav", type=Path, default=sample_wav())
     parser.add_argument("--long-wav", type=Path, default=mlx_models_dir().parent / LONG_CLIP)
     args = parser.parse_args()
-    checkpoint, out_dir = model_dir(args.checkpoint), encoder_dir()
+    checkpoint, out_dir = model_dir(args.checkpoint), encoder_dir(args.checkpoint)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     encoder = load_encoder(checkpoint)

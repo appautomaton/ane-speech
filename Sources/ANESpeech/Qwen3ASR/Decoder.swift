@@ -1,9 +1,10 @@
 public import CoreAI
 public import Foundation
 
-/// The Qwen3-ASR text decoder: layer segments plus a vocabulary head, each a
-/// Core AI model, sharing one KV cache that is allocated once and written in
-/// place.
+/// The Qwen3-ASR text decoder: layer segments plus a head, each a Core AI
+/// model, sharing one KV cache that is allocated once and written in place.
+/// The head maps a row to vocabulary logits, or for the aligner to time
+/// classes.
 ///
 /// A pass feeds up to `chunk` rows. It reads the `filled` cached positions
 /// through the mask, then appends its own keys and values at
@@ -21,9 +22,10 @@ public actor Qwen3ASRDecoder {
         public let step: Bool
         public let layersPerSegment: Int
         public let segments: Int
+        /// The model's width: 2048 for the recognizers, 1024 for the aligner.
+        public let hidden: Int
         public let kvHeads = 8
         public let headDim = 128
-        public let hidden = 2048
     }
 
     public enum DecoderError: Error {
@@ -84,9 +86,10 @@ public actor Qwen3ASRDecoder {
     /// `step` is set, and `decoder_head.aimodel` from `directory`.
     public init(
         directory: URL, chunk: Int, cache: Int, layersPerSegment: Int, segments count: Int, step: Bool,
-        masked: Float, preferring unit: ComputeUnitKind = .neuralEngine
+        hidden: Int, masked: Float, preferring unit: ComputeUnitKind = .neuralEngine
     ) async throws {
-        shape = Shape(chunk: chunk, cache: cache, step: step, layersPerSegment: layersPerSegment, segments: count)
+        shape = Shape(
+            chunk: chunk, cache: cache, step: step, layersPerSegment: layersPerSegment, segments: count, hidden: hidden)
         self.masked = Float16(masked)
         var models: [AIModel] = []
         var segments: [InferenceFunction] = []
