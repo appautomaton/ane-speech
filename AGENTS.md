@@ -248,14 +248,14 @@ wheel may claim an older macOS than `Package.swift` requires
 
 PyPI has 0.1.0, the two recognizers. `main` also carries the aligner, which
 is not released and has no release planned; `pyproject.toml` says
-`0.2.0.dev0`, and the README and the aligner's card send users to a source
+`0.1.1.dev0`, and the README and the aligner's card send users to a source
 checkout for it.
 
 PyPI trusts `release.yml` in this repo by OIDC, in the `pypi` environment, so
 no token exists anywhere. The environment needs the user's approval and takes
 only `v*` tags, and a ruleset limits `v*` tags to admins. To release:
 
-1. Set `version` in `pyproject.toml` (PEP 440; `0.2.0rc1` for a pre-release,
+1. Set `version` in `pyproject.toml` (PEP 440; `0.1.1rc1` for a pre-release,
    which pip and uv install only on request) and land it on `main` with CI
    green.
 2. `git tag v<version> && git push origin v<version>`. `release.yml` builds

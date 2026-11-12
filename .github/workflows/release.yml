@@ -4,7 +4,7 @@ name: Release
 # (trusted publishing), so no token is stored anywhere. The publish job waits
 # in the `pypi` environment until a maintainer approves it on GitHub.
 #
-# A tag like v0.2.0rc1 publishes a pre-release, which pip and uv install only
+# A tag like v0.1.1rc1 publishes a pre-release, which pip and uv install only
 # when asked for one.
 
 on:

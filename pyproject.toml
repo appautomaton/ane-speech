@@ -1,6 +1,6 @@
 [project]
 name = "ane-speech"
-version = "0.2.0.dev0"
+version = "0.1.1.dev0"
 description = "Speech recognition on the Apple Neural Engine"
 readme = "README.md"
 license = "MIT"
