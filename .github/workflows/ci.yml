@@ -1,0 +1,46 @@
+name: CI
+
+# Builds and checks the wheel on every push to main and every pull request.
+# release.yml calls this same workflow, so a release publishes exactly the
+# wheel these steps checked.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test
+    # macOS 27 with Xcode 27: the SDK that has Core AI.
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      - name: Build the CLI
+        run: swift build -c release
+
+      # Without the conversion group: these tests need neither coreai-core nor models.
+      - name: Test
+        run: uv run --locked --no-default-groups --group dev pytest
+
+      - name: Build the wheel
+        run: uv build --wheel
+
+      - name: Check the wheel
+        run: python3 .github/scripts/check_wheel.py dist/*.whl
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/*.whl
+          if-no-files-found: error

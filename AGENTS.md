@@ -32,6 +32,12 @@ bf16 safetensors (mlx-speech models/ or ~/dev/ai/models)
   -> Sources/      Swift runtime: import CoreAI, prefer the Neural Engine; reads only artifacts/
 ```
 
+Users get both without this repo. The converted models live on Hugging Face
+(`appautomaton/<model>-fp16-ane`, "Distribution" below), and a thin Python
+package, `ane-speech` on PyPI (`ane_speech/`), ships the Swift CLI inside a
+macOS arm64 wheel and downloads models by name. It runs the models only
+through `ane-speech serve`.
+
 ## Hard rules
 
 - **No litter.** Every file a run creates lives in this repo:
@@ -61,6 +67,11 @@ bf16 safetensors (mlx-speech models/ or ~/dev/ai/models)
   range in MLX. A block that overflows fp16 stays off the ANE.
 - **No torch.** Conversion goes MLX trace -> `coreai.authoring`. The Swift
   runtime never imports or shells out to Python.
+- **`serve` is an interface.** `ane_speech/` and tnt-asr speak its JSON lines
+  (`Sources/ane-speech/Serve.swift`). Change it only by adding fields.
+- **Only the user approves a release.** An agent may prepare a release and push
+  its tag; the `pypi` deployment then waits on GitHub for the user, and an
+  agent never approves it, even with credentials that could.
 - **No aggressive performance testing.** `docs/performance.md` is a one-time
   record. Rerun its commands only when a change needs a before-and-after
   comparison, and add the result there instead of building a suite.
@@ -73,6 +84,10 @@ convert/                 # Python: one subpackage per family
   <family>/              #   MLX graph translation, export entry point
   tests/
 reference/               # Python under mlx-speech's env: MLX traces and reference outputs
+ane_speech/              # the PyPI package: load()/generate()/stream_session() over `serve`,
+  tests/                 #   `pull` from Hugging Face, and the CLI entry point; tests need no models
+hatch_build.py           # builds the Swift CLI into the wheel and tags it macOS arm64
+.github/                 # ci.yml builds and checks the wheel; release.yml publishes it
 Sources/
   ANESpeech/             # Swift library
     Runtime/             #   load .aimodel, compute-unit preference, cache eviction
@@ -81,12 +96,13 @@ Sources/
   ane-speech/            # CLI
 Tests/ANESpeechTests/    # Swift tests, added with the first testable unit
 docs/performance.md      # one-time performance record; read it before measuring anything
+docs/model-cards/        # each Hugging Face repo's README.md and LICENSE
 artifacts/               # generated, gitignored; all the runtime reads, rebuilt only by conversion
-.build/ .tmp/            # generated, gitignored, safe to delete
+.build/ .tmp/ dist/      # generated, gitignored, safe to delete
 ```
 
-Python tests live in `convert/tests/` because APFS is case-insensitive and
-`tests/` would collide with SwiftPM's `Tests/`.
+Python tests live in `convert/tests/` and `ane_speech/tests/` because APFS is
+case-insensitive and `tests/` would collide with SwiftPM's `Tests/`.
 
 A family is a module on each side: `convert/<family>/` produces its artifacts and
 `Sources/ANESpeech/<Family>/` runs them. Shared code moves to `workspace.py`,
@@ -95,9 +111,11 @@ A family is a module on each side: `convert/<family>/` produces its artifacts an
 ## Commands
 
 ```sh
-uv sync                                         # conversion env in .venv
+uv sync                                         # conversion env in .venv, ane_speech editable
 uv run python -m convert.<family>               # export to artifacts/ (qwen3_asr: --checkpoint <name>)
-uv run pytest                                   # convert/tests
+uv run pytest                                   # convert/tests, ane_speech/tests
+uv build --wheel                                # dist/: the package with the release CLI inside
+uv run ane-speech <command>                     # the PyPI entry point; runs .build/release/ane-speech
 uv run --project ../mlx-speech python -m reference.<script>  # needs Metal: unsandboxed; --checkpoint <name>
 uv run --project ../mlx-speech python -m reference.qwen3_asr_decoder_trace --cache <rows>  # default 1152; docs/performance.md
 swift build
@@ -159,6 +177,65 @@ at those two moments:
 The manifest is an undocumented Core AI file. If an OS update changes its
 format, rely on step 3 and update step 2.
 
+## Distribution
+
+### Models on Hugging Face
+
+| Repo | Checkpoint | License |
+| --- | --- | --- |
+| `appautomaton/qwen3-asr-1.7b-fp16-ane` | `qwen3_asr_1_7b` | Apache-2.0 |
+| `appautomaton/confucius4-r2t2-fp16-ane` | `confucius4_r2t2` | NetEase Youdao Model Use License |
+
+Each repo mirrors `artifacts/qwen3_asr/` with only what the runtime reads: the
+shared `audio_encoder/` (`encoder.aimodel`, `encoder.json`) and one
+`<checkpoint>/` (`decoder.json`, the `decoder_*.aimodel` models, and
+`runtime/` without its reference files), about 4.4 GB, plus the card and
+license from `docs/model-cards/<repo>/`. R2T2's license requires its full text
+and the disclaimer sentence in the card on every redistribution.
+
+To publish a reconverted model, stage APFS clones, which take no space, and
+upload:
+
+```sh
+repo=qwen3-asr-1.7b-fp16-ane ck=qwen3_asr_1_7b src=artifacts/qwen3_asr out=.tmp/hf/$repo
+mkdir -p $out/audio_encoder $out/$ck/runtime
+cp -cR $src/audio_encoder/encoder.{aimodel,json} $out/audio_encoder/
+cp -cR $src/$ck/decoder.json $src/$ck/decoder_*.aimodel $out/$ck/
+cp -cR $src/$ck/runtime/{runtime.json,mel_filters.f32,embeddings.f16,tokenizer} $out/$ck/runtime/
+cp docs/model-cards/$repo/{README.md,LICENSE} $out/
+.build/release/ane-speech transcribe <audio> --artifacts $out/$ck   # the staged set is complete
+HF_XET_CACHE=$PWD/.tmp/xet hf upload appautomaton/$repo $out . --commit-message "<what changed>"
+```
+
+Then compare each local file's sha256 with the `lfs.oid` that
+`https://huggingface.co/api/models/appautomaton/<repo>/tree/main?recursive=true&expand=true`
+reports. Don't download a repo to check it.
+
+### The PyPI package
+
+`ane_speech.load(checkpoint)` downloads the checkpoint into the Hugging Face
+cache (`ane_speech/hub.py` lists the repos) and starts `ane-speech serve` on
+it. The `ane-speech` entry point adds `pull` and gives `transcribe`, `stream`,
+and `serve` the `--artifacts` of the checkpoint they name. In a source
+checkout the package runs `.build/release/ane-speech`; in a wheel, its own
+copy.
+
+PyPI trusts `release.yml` in this repo by OIDC, in the `pypi` environment, so
+no token exists anywhere. The environment needs the user's approval and takes
+only `v*` tags, and a ruleset limits `v*` tags to admins. To release:
+
+1. Set `version` in `pyproject.toml` (PEP 440; `0.2.0rc1` for a pre-release,
+   which pip and uv install only on request) and land it on `main` with CI
+   green.
+2. `git tag v<version> && git push origin v<version>`. `release.yml` builds
+   and checks the wheel through `ci.yml`, then waits.
+3. The user approves the deployment on GitHub, and the wheel goes to PyPI.
+
+Before the first release, make both model repos public
+(`hf repos settings appautomaton/<repo> --no-private`), and switch the
+README's and the model cards' getting-started steps to
+`uv tool install ane-speech`.
+
 ## Dependencies
 
 Add one only when the implementation proves it necessary.
@@ -166,7 +243,9 @@ Add one only when the implementation proves it necessary.
 | Package | Stance |
 | --- | --- |
 | `CoreAI` (system framework) | Swift runtime; no Swift packages yet |
-| `coreai-core`, `numpy` | Conversion only: `coreai.authoring` builds graphs, `coreai.runtime` checks them |
+| `huggingface-hub`, `numpy` | The PyPI package: model downloads, and samples for `serve` |
+| `hatchling` | Builds the wheel (`hatch_build.py`) |
+| `coreai-core` | Conversion only (the `convert` dependency group): `coreai.authoring` builds graphs, `coreai.runtime` checks them |
 | `coreai-opt` | Not yet. It builds native extensions; measure its footprint first |
 
 ## Footprint
@@ -181,4 +260,6 @@ What runs leave outside the repo. Measured, not assumed.
 | `uv sync` | `$TMPDIR/uv-<hash>.lock` | empty lock file, one per project | OS temp sweep |
 | MLX (`reference/`) | `$(getconf DARWIN_USER_CACHE_DIR)com.apple.metal` | ~0.2 MB of compiled shaders, shared by unbundled Metal processes | system-managed |
 | Core AI model load | `~/Library/Caches/coreai-cache/<OS build>/<process name>/` | one specialization per model and preference, about its weight size (24 MB for one encoder layer) | `ane-speech evict` for the CLI's entries; Python's land in `python3/`, which has no evict API |
+| `ane_speech.load`, `ane-speech pull` | `~/.cache/huggingface/hub/models--appautomaton--*` | about 4.4 GB per checkpoint | for users of the package; this repo runs models from `artifacts/` |
+| `hf upload` | `HF_XET_CACHE`, set to `.tmp/xet` | ~24 MB for both repos | delete `.tmp/xet` |
 | Core AI on the ANE (MPSGraph) | `$(getconf DARWIN_USER_TEMP_DIR)com.apple.MetalPerformanceShadersGraph/` | an empty `mpsgraph-<pid>-…` folder per ANE compile; ignores `TMPDIR` | `find … -type d -empty -delete`; OS temp sweep |

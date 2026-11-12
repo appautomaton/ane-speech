@@ -13,6 +13,8 @@ import Foundation
 ///
 /// `start`, `feed`, and `finalize` stream a take through R2T2; `transcribe`
 /// decodes a whole take at once, for a checkpoint without a streaming finetune.
+/// In place of "pcm", "path" names an audio file to read, in any format and
+/// rate Core Audio reads.
 ///
 /// Any failure replies {"error": "..."}. "ANE_READY" goes to stderr once the
 /// models are loaded; the helper exits when stdin closes.
@@ -20,6 +22,7 @@ func serve(_ asr: Qwen3ASR) async {
     struct Request: Decodable {
         let op: String
         let pcm: String?
+        let path: String?
         let language: String?
         let context: String?
         let chunk_ms: Int?
@@ -36,8 +39,11 @@ func serve(_ asr: Qwen3ASR) async {
     }
 
     func samples(_ request: Request) throws -> [Float] {
+        if let path = request.path {
+            return try AudioFile.read(URL(filePath: path), sampleRate: Double(asr.config.sample_rate))
+        }
         guard let pcm = request.pcm, let bytes = Data(base64Encoded: pcm)
-        else { throw ServeError(description: "\(request.op) needs base64 pcm") }
+        else { throw ServeError(description: "\(request.op) needs base64 pcm or a path") }
         return bytes.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
     }
 

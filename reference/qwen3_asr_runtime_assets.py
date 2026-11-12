@@ -91,7 +91,9 @@ def main() -> None:
 
     text = config.text_config
     runtime = {
-        "source": str(checkpoint.resolve()),  # provenance only; the runtime never reads it
+        # Provenance only; the runtime never reads it. "~" keeps the home folder out
+        # of artifacts that are published.
+        "source": str(checkpoint.resolve()).replace(str(Path.home()), "~", 1),
         "encoder": f"../{ENCODER}",  # relative to the checkpoint's artifacts
         "sample_rate": extractor.sample_rate,
         "n_fft": extractor.n_fft,

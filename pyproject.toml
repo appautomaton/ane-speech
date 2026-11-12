@@ -1,25 +1,61 @@
 [project]
-name = "ane-speech-convert"
-version = "0.0.0"
-description = "Convert mlx-speech checkpoints to Core AI models."
-requires-python = ">=3.13"
+name = "ane-speech"
+version = "0.1.0"
+description = "Speech recognition on the Apple Neural Engine"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "App Automaton" }]
+requires-python = ">=3.11"
 dependencies = [
-    "coreai-core==1.0.0b3",
-    "numpy",
+    "huggingface-hub>=1.0",
+    "numpy>=1.26",
+]
+keywords = ["apple-neural-engine", "asr", "core-ai", "speech-recognition", "transcription"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: MacOS X",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
 ]
 
+[project.urls]
+Homepage = "https://github.com/appautomaton/ane-speech"
+Issues = "https://github.com/appautomaton/ane-speech/issues"
+Models = "https://huggingface.co/appautomaton"
+
+[project.scripts]
+ane-speech = "ane_speech.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+# The wheel holds ane_speech/ and the Swift CLI (hatch_build.py). Conversion
+# (convert/, reference/) stays in the repo.
+[tool.hatch.build.targets.wheel]
+packages = ["ane_speech"]
+exclude = ["ane_speech/tests"]
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+
 [dependency-groups]
+convert = [
+    "coreai-core==1.0.0b3; python_version >= '3.13'",
+]
 dev = [
     "pytest>=8.3,<9",
     "ruff>=0.11,<0.12",
 ]
 
 [tool.uv]
-package = false
+default-groups = ["convert", "dev"]
 
 [tool.pytest.ini_options]
 addopts = ["--strict-config", "--strict-markers"]
-testpaths = ["convert/tests"]
+testpaths = ["convert/tests", "ane_speech/tests"]
 pythonpath = ["."]
 
 [tool.ruff]

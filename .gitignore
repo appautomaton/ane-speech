@@ -5,6 +5,7 @@ artifacts/
 .build/
 .swiftpm/
 .tmp/
+dist/
 
 # Python
 .venv/
