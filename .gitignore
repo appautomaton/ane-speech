@@ -1,0 +1,13 @@
+.DS_Store
+
+# Generated. Everything here is reproducible and safe to delete.
+artifacts/
+.build/
+.swiftpm/
+.tmp/
+
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
