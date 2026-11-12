@@ -29,9 +29,13 @@ jobs:
       - name: Build the CLI
         run: swift build -c release
 
-      # Without the conversion group: these tests need neither coreai-core nor models.
+      # Without the conversion group: these tests need neither coreai-core nor
+      # models. The oldest Python the package supports, and the newest.
       - name: Test
-        run: uv run --locked --no-default-groups --group dev pytest
+        run: |
+          for python in 3.11 3.14; do
+            uv run --python "$python" --locked --no-default-groups --group dev pytest
+          done
 
       - name: Build the wheel
         run: uv build --wheel

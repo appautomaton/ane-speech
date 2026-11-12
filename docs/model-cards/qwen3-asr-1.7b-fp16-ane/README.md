@@ -44,25 +44,26 @@ Core AI conversion of [Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7
 
 ## How to Get Started
 
-Build the runtime and download the model into it:
+Install [`ane-speech`](https://pypi.org/project/ane-speech/); the model downloads from this repo on first use.
 
 ```bash
-git clone https://github.com/appautomaton/ane-speech.git
-cd ane-speech
-swift build -c release
-hf download appautomaton/qwen3-asr-1.7b-fp16-ane --local-dir artifacts/qwen3_asr \
-  --include "audio_encoder/*" --include "qwen3_asr_1_7b/*"
-```
-
-Transcribe a recording:
-
-```bash
-.build/release/ane-speech transcribe speech.wav --checkpoint qwen3_asr_1_7b
-.build/release/ane-speech transcribe speech.wav --checkpoint qwen3_asr_1_7b \
+uv tool install ane-speech
+ane-speech transcribe speech.wav --checkpoint qwen3_asr_1_7b
+ane-speech transcribe speech.wav --checkpoint qwen3_asr_1_7b \
   --language Chinese --context "names and terms to expect"
 ```
 
-The first load compiles the model for your Mac's Neural Engine and caches the result, so later loads take a fraction of a second. Apps can keep the model loaded with `ane-speech serve --checkpoint qwen3_asr_1_7b`, which answers JSON requests on stdin.
+From Python (`pip install ane-speech`):
+
+```python
+import ane_speech
+
+asr = ane_speech.load("qwen3_asr_1_7b")
+result = asr.generate("speech.wav")      # a file, or 16 kHz mono float32 samples
+print(result.language, result.text)
+```
+
+The first load compiles the model for your Mac's Neural Engine and caches the result, so later loads take a fraction of a second. `ane-speech pull qwen3_asr_1_7b` downloads ahead of time.
 
 ## Notes
 

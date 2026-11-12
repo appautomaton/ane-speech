@@ -211,11 +211,15 @@ Then compare each local file's sha256 with the `lfs.oid` that
 `https://huggingface.co/api/models/appautomaton/<repo>/tree/main?recursive=true&expand=true`
 reports. Don't download a repo to check it.
 
+Installed packages download the commit that `ane_speech/hub.py` pins, so a new
+model reaches users only when a release pins its commit. A card-only upload
+needs no release.
+
 ### The PyPI package
 
 `ane_speech.load(checkpoint)` downloads the checkpoint into the Hugging Face
-cache (`ane_speech/hub.py` lists the repos) and starts `ane-speech serve` on
-it. The `ane-speech` entry point adds `pull` and gives `transcribe`, `stream`,
+cache (`ane_speech/hub.py` lists the repos and pinned commits) and starts
+`ane-speech serve` on it. The `ane-speech` entry point adds `pull` and gives `transcribe`, `stream`,
 and `serve` the `--artifacts` of the checkpoint they name. In a source
 checkout the package runs `.build/release/ane-speech`; in a wheel, its own
 copy.
@@ -230,11 +234,6 @@ only `v*` tags, and a ruleset limits `v*` tags to admins. To release:
 2. `git tag v<version> && git push origin v<version>`. `release.yml` builds
    and checks the wheel through `ci.yml`, then waits.
 3. The user approves the deployment on GitHub, and the wheel goes to PyPI.
-
-Before the first release, make both model repos public
-(`hf repos settings appautomaton/<repo> --no-private`), and switch the
-README's and the model cards' getting-started steps to
-`uv tool install ane-speech`.
 
 ## Dependencies
 

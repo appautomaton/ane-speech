@@ -80,24 +80,28 @@ Core AI conversion of NetEase Youdao's [Confucius4-R2T2](https://huggingface.co/
 
 ## How to Get Started
 
-Build the runtime and download the model into it:
+Install [`ane-speech`](https://pypi.org/project/ane-speech/); the model downloads from this repo on first use.
 
 ```bash
-git clone https://github.com/appautomaton/ane-speech.git
-cd ane-speech
-swift build -c release
-hf download appautomaton/confucius4-r2t2-fp16-ane --local-dir artifacts/qwen3_asr \
-  --include "audio_encoder/*" --include "confucius4_r2t2/*"
+uv tool install ane-speech
+ane-speech stream speech.wav --chunk-ms 480     # as if spoken live, printing text as it settles
+ane-speech transcribe speech.wav                # the whole recording at once
 ```
 
-Play a recording through the model as if it were spoken live, printing text as it settles, or transcribe it whole:
+From Python (`pip install ane-speech`), feed microphone audio as it arrives:
 
-```bash
-.build/release/ane-speech stream speech.wav --chunk-ms 480
-.build/release/ane-speech transcribe speech.wav
+```python
+import ane_speech
+
+live = ane_speech.load("confucius4_r2t2")
+session = live.stream_session(chunk_ms=480)
+for pcm in microphone:                 # float32, 16 kHz mono, any length
+    update = session.feed(pcm)
+    print(update.committed)            # append-only committed text
+print(session.finalize().text)
 ```
 
-The first load compiles the model for your Mac's Neural Engine and caches the result, so later loads take a fraction of a second. Apps can keep the model loaded with `ane-speech serve`, which answers JSON requests on stdin, live microphone audio included.
+The first load compiles the model for your Mac's Neural Engine and caches the result, so later loads take a fraction of a second. `ane-speech pull confucius4_r2t2` downloads ahead of time.
 
 ## Streaming
 
