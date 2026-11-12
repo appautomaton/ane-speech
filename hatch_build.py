@@ -1,11 +1,17 @@
-"""Builds the Swift CLI into the wheel, which makes the wheel macOS arm64 only,
-for the macOS that Package.swift requires."""
+"""Builds the Swift CLI into the wheel, which makes the wheel macOS arm64 only."""
 
 import re
 import subprocess
 from pathlib import Path
 
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
+
+# PyPI accepts macOS wheel tags only for the versions it lists, and it lists
+# none newer than 26 yet (warehouse/utils/wheel.py), so the wheel is tagged for
+# the newest it accepts, as Apple's coreai-core is. ane_speech checks the real
+# minimum, Package.swift's, before it runs the CLI. Raise this once PyPI
+# accepts that version.
+PYPI_NEWEST_MACOS = 26
 
 
 class SwiftCLI(BuildHookInterface):
@@ -21,4 +27,4 @@ class SwiftCLI(BuildHookInterface):
             raise RuntimeError("Package.swift names no macOS version")
         build_data["force_include"][str(Path(bin_dir.stdout.strip()) / "ane-speech")] = "ane_speech/bin/ane-speech"
         build_data["pure_python"] = False
-        build_data["tag"] = f"py3-none-macosx_{macos[1]}_0_arm64"
+        build_data["tag"] = f"py3-none-macosx_{min(int(macos[1]), PYPI_NEWEST_MACOS)}_0_arm64"

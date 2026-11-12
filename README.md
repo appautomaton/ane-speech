@@ -34,8 +34,8 @@ uv tool install ane-speech     # the command line
 pip install ane-speech         # the Python library, command line included
 ```
 
-You need a Mac with Apple silicon and a macOS release that includes Core AI.
-On any other machine the install finds no matching package.
+You need a Mac with Apple silicon and a macOS release that includes Core AI;
+on an older macOS, ane-speech says so when it starts.
 
 ## Models
 

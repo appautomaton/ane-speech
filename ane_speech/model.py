@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import platform
 import subprocess
 import threading
 from dataclasses import dataclass
@@ -20,6 +21,9 @@ import numpy as np
 from ane_speech.hub import DEFAULT, pull
 
 SAMPLE_RATE = 16000
+# Package.swift's platform. The wheel's tag can only claim an older macOS
+# (hatch_build.py), so binary() checks this one.
+MIN_MACOS = 27
 # The first load on a new macOS build compiles the models for the Neural
 # Engine, which takes far longer than the usual sub-second load.
 _READY_TIMEOUT_SECONDS = 600
@@ -27,6 +31,10 @@ _READY_TIMEOUT_SECONDS = 600
 
 def binary() -> Path:
     """The ane-speech CLI: the copy inside the wheel, or a source checkout's release build."""
+    release = platform.mac_ver()[0]
+    if not release or int(release.split(".")[0]) < MIN_MACOS:
+        raise RuntimeError(f"ane-speech needs macOS {MIN_MACOS} or later on Apple silicon; "
+                           f"this is {f'macOS {release}' if release else platform.system()}")
     here = Path(__file__).resolve().parent
     for path in (here / "bin" / "ane-speech", here.parent / ".build" / "release" / "ane-speech"):
         if path.is_file():

@@ -1,7 +1,9 @@
 """The serve protocol, against a stand-in for the Swift helper."""
 
+import re
 import sys
 import textwrap
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -84,3 +86,8 @@ def test_restarts_a_helper_that_exited(model):
 def test_refuses_a_folder_without_a_checkpoint(tmp_path):
     with pytest.raises(FileNotFoundError, match="no converted checkpoint"):
         Model(tmp_path)
+
+
+def test_min_macos_follows_package_swift():
+    swift = (Path(__file__).parents[2] / "Package.swift").read_text()
+    assert re.search(r'\.macOS\("(\d+)', swift)[1] == str(ane_speech.model.MIN_MACOS)

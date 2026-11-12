@@ -222,7 +222,9 @@ cache (`ane_speech/hub.py` lists the repos and pinned commits) and starts
 `ane-speech serve` on it. The `ane-speech` entry point adds `pull` and gives `transcribe`, `stream`,
 and `serve` the `--artifacts` of the checkpoint they name. In a source
 checkout the package runs `.build/release/ane-speech`; in a wheel, its own
-copy.
+copy. PyPI rejects macOS wheel tags newer than the versions it lists, so the
+wheel may claim an older macOS than `Package.swift` requires
+(`PYPI_NEWEST_MACOS` in `hatch_build.py`); `binary()` checks the real one.
 
 PyPI trusts `release.yml` in this repo by OIDC, in the `pypi` environment, so
 no token exists anywhere. The environment needs the user's approval and takes
